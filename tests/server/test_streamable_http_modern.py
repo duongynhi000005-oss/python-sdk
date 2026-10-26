@@ -809,6 +809,60 @@ async def test_disconnect_cancels_handler_and_runs_exit_stack() -> None:
     assert handler_started.is_set()
 
 
+async def test_json_mode_disconnect_cancels_handler_and_runs_exit_stack() -> None:
+    """JSON mode: when the client disconnects before completion the handler task is cancelled
+    and `connection.exit_stack` still unwinds."""
+    handler_started = anyio.Event()
+    cleanup_ran = anyio.Event()
+
+    async def list_tools(ctx: ServerRequestContext, params: PaginatedRequestParams | None) -> ListToolsResult:
+        ctx.session._connection.exit_stack.callback(cleanup_ran.set)
+        handler_started.set()
+        await anyio.Event().wait()
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    server: Server[Any] = Server("test", on_list_tools=list_tools)
+    body = json.dumps(_list_tools_body()).encode()
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "server": ("testserver", 80),
+        "client": ("127.0.0.1", 1234),
+        "path": "/mcp",
+        "raw_path": b"/mcp",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"host", b"testserver"),
+            (b"content-type", b"application/json"),
+            (b"accept", b"application/json"),
+            (MCP_PROTOCOL_VERSION_HEADER.encode(), LATEST_MODERN_VERSION.encode()),
+            (MCP_METHOD_HEADER.encode(), b"tools/list"),
+        ],
+    }
+    request_delivered = anyio.Event()
+
+    async def receive() -> Message:
+        if not request_delivered.is_set():
+            request_delivered.set()
+            return {"type": "http.request", "body": body, "more_body": False}
+        await handler_started.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:  # pragma: no cover
+        pass
+
+    with anyio.fail_after(5):
+        async with server.lifespan(server) as lifespan_state:
+            await handle_modern_request(server, None, True, lifespan_state, scope, receive, send)
+        await cleanup_ran.wait()
+
+    assert handler_started.is_set()
+
+
 # --- Mcp-Param-* validation (SEP-2243 server half) -------------------------------
 
 

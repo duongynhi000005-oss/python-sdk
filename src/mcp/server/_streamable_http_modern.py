@@ -105,6 +105,7 @@ class _SingleExchangeDispatchContext:
 
     async def notify(self, method: str, params: Mapping[str, Any] | None, opts: CallOptions | None = None) -> None:
         if self.sink is None:
+            logger.debug("dropped %s: no response stream (JSON-response mode)", method)
             return
         body = dict(params) if params is not None else None
         try:
@@ -456,10 +457,35 @@ async def handle_modern_request(
         # A listen response IS a notification stream, so it always takes the
         # SSE path below regardless of the JSON-response preference (the
         # TypeScript and Go SDKs route it the same way).
-        msg = await _to_jsonrpc_response(
-            req.id, serve_one(app, dctx, req.method, req.params, connection=connection, lifespan_state=lifespan_state)
-        )
-        await _write(msg, scope, receive, send)
+        result: list[JSONRPCResponse | JSONRPCError] = []
+
+        async def watch_disconnect(cancel_scope: anyio.CancelScope) -> None:
+            while (await receive()).get("type") != "http.disconnect":
+                pass  # pragma: no cover
+            cancel_scope.cancel()
+
+        with anyio.CancelScope() as handler_scope:
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(watch_disconnect, handler_scope)
+                try:
+                    result.append(
+                        await _to_jsonrpc_response(
+                            req.id,
+                            serve_one(
+                                app,
+                                dctx,
+                                req.method,
+                                req.params,
+                                connection=connection,
+                                lifespan_state=lifespan_state,
+                            ),
+                        )
+                    )
+                finally:
+                    tg.cancel_scope.cancel()
+
+        if result:
+            await _write(result[0], scope, receive, send)
         return
 
     send_ch, recv_ch = anyio.create_memory_object_stream[bytes](0)
