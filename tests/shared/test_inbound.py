@@ -936,3 +936,20 @@ def test_find_duplicated_routing_header_detects_repeats_of_routing_headers_only(
     assert find_duplicated_routing_header([("Mcp-Method", "a"), ("Mcp-Method", "a")]) == MCP_METHOD_HEADER
     assert find_duplicated_routing_header([("Mcp-Name", "a"), ("Mcp-Param-X", "1"), ("Mcp-Param-X", "2")]) is None
     assert find_duplicated_routing_header([("accept", "a"), ("accept", "b")]) is None
+
+
+def test_decode_header_value_normalizes_http_optional_whitespace() -> None:
+    """RFC 9110 §5.6.3: leading and trailing HTTP OWS (spaces, tabs) are stripped."""
+    assert decode_header_value(" tools/call ") == "tools/call"
+    assert decode_header_value("\ttools/call\t") == "tools/call"
+    assert decode_header_value(" \ttools/call\t ") == "tools/call"
+    assert decode_header_value("  =?base64?dGVzdA==?=  ") == "test"
+
+
+def test_header_rung_accepts_whitespace_padded_name_header() -> None:
+    """RFC 9110 / sep-2243: Mcp-Name with leading or trailing HTTP OWS matches the body parameter."""
+    body = envelope("tools/call", extra_params={"name": "test_tool"})
+    headers = matching_headers(body)
+    headers[MCP_NAME_HEADER] = "  test_tool \t"
+    result = classify_inbound_request(body, headers=headers)
+    assert isinstance(result, InboundModernRoute)
