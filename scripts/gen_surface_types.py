@@ -68,6 +68,26 @@ SCHEMA_PATCHES: dict[str, list[tuple[str, Any, Any]]] = {
             {"additionalProperties": True, "properties": {}, "type": "object"},
             {"anyOf": [{"additionalProperties": True, "properties": {}, "type": "object"}, {"type": "boolean"}]},
         ),
+        # SEP-2133 extensions became official in 2026-07-28, but are negotiated through
+        # `initialize` on legacy connections (modelcontextprotocol/modelcontextprotocol#3364).
+        (
+            "$defs/ClientCapabilities/properties/extensions",
+            None,
+            {
+                "additionalProperties": {"additionalProperties": True, "properties": {}, "type": "object"},
+                "description": "Optional MCP extensions that the client supports.",
+                "type": "object",
+            },
+        ),
+        (
+            "$defs/ServerCapabilities/properties/extensions",
+            None,
+            {
+                "additionalProperties": {"additionalProperties": True, "properties": {}, "type": "object"},
+                "description": "Optional MCP extensions that the server supports.",
+                "type": "object",
+            },
+        ),
     ],
     "2026-07-28": [
         ("$defs/NumberSchema/properties/default/type", "number", ["integer", "number"]),
@@ -158,9 +178,10 @@ def patch_schema(schema: dict[str, Any], patches: list[tuple[str, Any, Any]]) ->
         node: Any = schema
         for part in parts:
             node = node[int(part) if part.isdigit() else part]
-        if node[leaf] != old:
-            raise SystemExit(f"schema patch {path}: expected {old!r}, found {node[leaf]!r}")
-        node[leaf] = new
+        actual = node.get(leaf) if isinstance(node, dict) else node[int(leaf)]
+        if actual != old:
+            raise SystemExit(f"schema patch {path}: expected {old!r}, found {actual!r}")
+        node[int(leaf) if isinstance(node, list) else leaf] = new
 
 
 def make_server_info_opaque(schema: dict[str, Any]) -> None:

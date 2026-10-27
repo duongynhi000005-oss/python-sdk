@@ -176,14 +176,15 @@ async def test_extension_settings_advertised_under_server_capabilities() -> None
     assert extensions == snapshot({"com.example/settings": {"feature": {"enabled": True}}})
 
 
-async def test_extension_settings_dropped_on_legacy_handshake() -> None:
-    """Pinned gap: the 2025 `ServerCapabilities` wire schema has no `extensions`
-    field, so a legacy `initialize` handshake drops the advertised extension even
-    though the modern `auto` path carries it."""
+async def test_extension_settings_preserved_on_legacy_handshake() -> None:
+    """SDK-defined: a legacy `initialize` handshake preserves the advertised
+    extension settings under `server_capabilities.extensions[identifier]`."""
     server = MCPServer("test", extensions=[_SettingsExt()])
 
     async with Client(server, mode="legacy") as client:
-        assert client.server_capabilities.extensions is None
+        assert client.server_capabilities.extensions == snapshot(
+            {"com.example/settings": {"feature": {"enabled": True}}}
+        )
 
 
 def test_duplicate_extension_identifier_raises() -> None:

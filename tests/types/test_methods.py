@@ -470,6 +470,31 @@ def test_discovery_capabilities_preserve_nested_json_values() -> None:
     assert methods.serialize_server_result("server/discover", "2026-07-28", raw) == raw
 
 
+@pytest.mark.parametrize("version", [v for v in KNOWN_PROTOCOL_VERSIONS if v < "2026-07-28"])
+def test_legacy_initialize_preserves_capabilities_extensions_in_both_directions(version: str) -> None:
+    """`capabilities.extensions` survives legacy `initialize` parsing and serialization in both directions."""
+    extensions = {"io.modelcontextprotocol/ui": {"mimeTypes": ["text/html;profile=mcp-app"]}}
+    request_params = {
+        "protocolVersion": version,
+        "capabilities": {"roots": {"listChanged": True}, "extensions": extensions},
+        "clientInfo": {"name": "client", "version": "1.0"},
+    }
+    parsed_req = methods.parse_client_request("initialize", version, request_params)
+    assert isinstance(parsed_req, types.InitializeRequest)
+    assert parsed_req.params.capabilities.extensions == extensions
+
+    result_data = {
+        "protocolVersion": version,
+        "capabilities": {"tools": {}, "extensions": extensions},
+        "serverInfo": {"name": "server", "version": "1.0"},
+    }
+    serialized = methods.serialize_server_result("initialize", version, result_data)
+    assert serialized["capabilities"]["extensions"] == extensions
+    parsed_res = methods.parse_server_result("initialize", version, serialized)
+    assert isinstance(parsed_res, types.InitializeResult)
+    assert parsed_res.capabilities.extensions == extensions
+
+
 def test_elicit_request_surface_accepts_loose_property_schemas():
     """Older python-sdk emits `anyOf` for `Optional` form fields; the surface gate must let it through."""
     params = {
